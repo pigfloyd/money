@@ -13,9 +13,9 @@
     input[type=number],input[type=time]{flex:1;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:14px}
     .btn-start{width:100%;padding:12px;border-radius:8px;border:0;background:#000;color:#fff;font-size:16px;cursor:pointer;margin-top:12px}
     .display{display:none;flex-direction:column;align-items:center;justify-content:center;position:relative}
-    .money-box{display:flex;align-items:flex-end;gap:12px}
+    .money-box{display:flex;align-items:flex-end;gap:12px;}
     .currency{font-size:48px;font-weight:700}
-    .digits{display:flex;height:88px;overflow:hidden}
+    .digits{display:flex;height:88px;overflow:hidden;align-items:flex-end;}
     .digit-slot{width:38px;height:88px;border-radius:8px;overflow:hidden;display:inline-block}
     .digit-strip{display:block;transform:translateY(0);transition:transform 700ms cubic-bezier(.2,.9,.2,1)}
     .digit{height:88px;line-height:88px;font-size:64px;font-weight:700;text-align:center}
@@ -26,7 +26,7 @@
       top:16px;
       right:16px;
       font-size:24px;
-      width: 44px;
+      width: 40px;
       height: 34px;
       color:#000;
       display:none;
@@ -38,6 +38,7 @@
       border-radius:8px;
       background:#f8f8f8;
       transition:background 0.3s,opacity 0.3s;
+      padding-bottom: 3px;
     }
     .reset-icon:hover{background:#eee;opacity:0.8;}
 
@@ -54,8 +55,7 @@
       <div class="row"><label>刷新频率（秒）</label><input id="freq" type="number" min="0.1" step="0.1" value="1"></div>
       <div class="row"><label>月薪（元）</label><input id="salary" type="number" min="0" step="100" value="5000"></div>
       <div class="row"><label>每月上班天数</label><input id="days" type="number" min="1" step="1" value="22"></div>
-      <div class="row"><label>每天上班时长（小时）</label><input id="hours" type="number" min="1" step="0.5" value="8"></div>
-      <div class="row"><label>几点开始上班？</label><input id="startHour" type="time" value="09:00"></div>
+      <div class="row"><label>上班时间</label><input id="startHour" type="time" value="09:00"><span style="padding:0 4px;opacity:0.7">—</span><input id="endHour" type="time" value="18:00"></div>
       <button class="btn-start" id="startBtn">开始计算</button>
     </div>
 
@@ -104,31 +104,51 @@
       })
     }
 
-    function computeTodayAmount(monthSalary,daysPerMonth,hoursPerDay,startTime){
+    function computeTodayAmount(monthSalary,daysPerMonth,startTime,endTime){
       const [startHour,startMinute]=startTime.split(':').map(Number);
+      const [endHour,endMinute]=endTime.split(':').map(Number);
       const dailyPay=monthSalary/Math.max(1,daysPerMonth);
       const now=new Date();
-      const start=new Date(now.getFullYear(),now.getMonth(),now.getDate(),startHour,startMinute,0);
-      const workSeconds=hoursPerDay*3600;
-      let elapsed=(now-start)/1000;if(elapsed<0)elapsed=0;if(elapsed>workSeconds)elapsed=workSeconds;
-      const perSecond=dailyPay/workSeconds;return elapsed*perSecond;
+      const msDay=24*60*60*1000;
+      const startToday=new Date(now.getFullYear(),now.getMonth(),now.getDate(),startHour,startMinute,0);
+      let endToday=new Date(now.getFullYear(),now.getMonth(),now.getDate(),endHour,endMinute,0);
+      const overnight=endToday<=startToday; if(overnight) endToday=new Date(endToday.getTime()+msDay);
+
+      const startPrev=new Date(startToday.getTime()-msDay);
+      const endPrev=new Date(endToday.getTime()-msDay);
+
+      const workMs=endToday-startToday; let workSeconds=workMs/1000;
+      if(!isFinite(workSeconds) || workSeconds<=0){workSeconds=1800}
+
+      const inRange=(t,a,b)=>t>=a && t<=b;
+      let activeStart=null,activeEnd=null;
+      if(inRange(now,startToday,endToday)) {activeStart=startToday; activeEnd=endToday;}
+      else if(inRange(now,startPrev,endPrev)) {activeStart=startPrev; activeEnd=endPrev;}
+      let elapsed=0;
+      if(activeStart){
+        elapsed=(now-activeStart)/1000; if(elapsed<0) elapsed=0; if(elapsed>workSeconds) elapsed=workSeconds;
+      }else{
+        // 不在工作窗口内：在开始前为0；在结束后为满额
+        elapsed = now<startToday ? 0 : workSeconds;
+      }
+      const perSecond=dailyPay/workSeconds; return elapsed*perSecond;
     }
 
     function start(fromCache=false){
       const freq=Math.max(0.1,Number(document.getElementById('freq').value));
       const salary=Math.max(0,Number(document.getElementById('salary').value));
       const days=Math.max(1,Number(document.getElementById('days').value));
-      const hours=Math.max(0.5,Number(document.getElementById('hours').value));
       const startTime=document.getElementById('startHour').value||'09:00';
+      const endTime=document.getElementById('endHour').value||'18:00';
 
       // 保存到 localStorage
-      localStorage.setItem('wageSettings', JSON.stringify({freq,salary,days,hours,startTime}));
+      localStorage.setItem('wageSettings', JSON.stringify({freq,salary,days,startTime,endTime}));
 
       controls.style.display='none';display.style.display='flex';
       resetBtn.style.display='flex';
 
       function tick(){
-        const amt=computeTodayAmount(salary,days,hours,startTime);
+        const amt=computeTodayAmount(salary,days,startTime,endTime);
         const formatted=formatAmount(amt);
         updateDigitsTo(formatted);
       }
@@ -149,12 +169,12 @@
       const cache=localStorage.getItem('wageSettings');
       if(cache){
         try{
-          const {freq,salary,days,hours,startTime}=JSON.parse(cache);
+          const {freq,salary,days,startTime,endTime}=JSON.parse(cache);
           document.getElementById('freq').value=freq;
           document.getElementById('salary').value=salary;
           document.getElementById('days').value=days;
-          document.getElementById('hours').value=hours;
           document.getElementById('startHour').value=startTime;
+          if(endTime){document.getElementById('endHour').value=endTime;}
           start(true);
         }catch(e){console.error(e)}
       }
