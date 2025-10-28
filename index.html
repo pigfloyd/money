@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>实时今日工资到账</title>
+  <style>
+    html,body{height:100%;margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial;color:#000;background:#fff}
+    .wrap{min-height:100%;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;position:relative}
+    .controls{width:420px;max-width:92vw}
+    .row{display:flex;gap:8px;margin-bottom:10px;align-items:center}
+    label{width:140px;font-size:14px}
+    input[type=number],input[type=time]{flex:1;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:14px}
+    .btn-start{width:100%;padding:12px;border-radius:8px;border:0;background:#000;color:#fff;font-size:16px;cursor:pointer;margin-top:12px}
+    .display{display:none;flex-direction:column;align-items:center;justify-content:center;position:relative}
+    .money-box{display:flex;align-items:flex-end;gap:12px}
+    .currency{font-size:48px;font-weight:700}
+    .digits{display:flex;height:88px;overflow:hidden}
+    .digit-slot{width:38px;height:88px;border-radius:8px;overflow:hidden;display:inline-block}
+    .digit-strip{display:block;transform:translateY(0);transition:transform 700ms cubic-bezier(.2,.9,.2,1)}
+    .digit{height:88px;line-height:88px;font-size:64px;font-weight:700;text-align:center}
+
+    /* reset 按钮样式 */
+    .reset-icon{
+      position:fixed;
+      top:16px;
+      right:16px;
+      font-size:24px;
+      width: 44px;
+      height: 34px;
+      color:#000;
+      display:none; /* 默认隐藏 */
+      align-items:center;
+      justify-content:center;
+      cursor:pointer;
+      user-select:none;
+      transition:opacity 0.3s;
+    }
+    .reset-icon:hover{opacity: 0.8;}
+
+    @media (max-width:420px){
+      .currency{font-size:36px}
+      .digit{font-size:48px;height:64px;line-height:64px}
+      .digit-slot{width:30px;height:64px}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="controls" id="controls">
+      <div class="row"><label>刷新频率（秒）</label><input id="freq" type="number" min="0.1" step="0.1" value="1"></div>
+      <div class="row"><label>月薪（元）</label><input id="salary" type="number" min="0" step="100" value="5000"></div>
+      <div class="row"><label>每月上班天数</label><input id="days" type="number" min="1" step="1" value="22"></div>
+      <div class="row"><label>每天上班时长（小时）</label><input id="hours" type="number" min="1" step="0.5" value="8"></div>
+      <div class="row"><label>几点开始上班？</label><input id="startHour" type="time" value="09:00"></div>
+      <button class="btn-start" id="startBtn">开始计算</button>
+    </div>
+
+    <div class="display" id="display">
+      <div class="money-box">
+        <div class="currency">￥</div>
+        <div id="digitsWrap" class="digits" aria-live="polite"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="reset-icon" id="resetBtn">⟳</div>
+
+  <script>
+    const startBtn=document.getElementById('startBtn');
+    const resetBtn=document.getElementById('resetBtn');
+    const controls=document.getElementById('controls');
+    const display=document.getElementById('display');
+    const digitsWrap=document.getElementById('digitsWrap');
+    let timer=null;
+
+    function createDigitsContainer(charCount){
+      digitsWrap.innerHTML='';
+      for(let i=0;i<charCount;i++){
+        const slot=document.createElement('div');slot.className='digit-slot';
+        const strip=document.createElement('div');strip.className='digit-strip';
+        for(let d=0;d<20;d++){const digit=document.createElement('div');digit.className='digit';digit.textContent=(d%10).toString();strip.appendChild(digit)}
+        slot.appendChild(strip);digitsWrap.appendChild(slot);
+      }
+    }
+
+    function formatAmount(value){return Number(value).toFixed(2).split('')}
+
+    function updateDigitsTo(chars){
+      const slots=digitsWrap.querySelectorAll('.digit-slot');
+      if(slots.length!==chars.length)createDigitsContainer(chars.length);
+      const newSlots=digitsWrap.querySelectorAll('.digit-slot');
+      newSlots.forEach((slot,idx)=>{
+        const strip=slot.firstElementChild;const ch=chars[idx];
+        if(ch==='.'){strip.style.transition='none';strip.style.transform='translateY(0px)';strip.innerHTML='<div class="digit">.</div>';slot.style.width='18px';}
+        else{
+          if(strip.children.length<10){strip.innerHTML='';for(let d=0;d<20;d++){const digit=document.createElement('div');digit.className='digit';digit.textContent=(d%10).toString();strip.appendChild(digit)}slot.style.width='';}
+          const target=parseInt(ch,10);const targetIndex=10+target;const digitHeight=strip.children[0].offsetHeight||88;const y=-targetIndex*digitHeight;
+          strip.style.transition='transform 700ms cubic-bezier(.2,.9,.2,1)';strip.style.transform=`translateY(${y}px)`;
+        }
+      })
+    }
+
+    function computeTodayAmount(monthSalary,daysPerMonth,hoursPerDay,startTime){
+      const [startHour,startMinute]=startTime.split(':').map(Number);
+      const dailyPay=monthSalary/Math.max(1,daysPerMonth);
+      const now=new Date();
+      const start=new Date(now.getFullYear(),now.getMonth(),now.getDate(),startHour,startMinute,0);
+      const workSeconds=hoursPerDay*3600;
+      let elapsed=(now-start)/1000;if(elapsed<0)elapsed=0;if(elapsed>workSeconds)elapsed=workSeconds;
+      const perSecond=dailyPay/workSeconds;return elapsed*perSecond;
+    }
+
+    function start(){
+      const freq=Math.max(0.1,Number(document.getElementById('freq').value));
+      const salary=Math.max(0,Number(document.getElementById('salary').value));
+      const days=Math.max(1,Number(document.getElementById('days').value));
+      const hours=Math.max(0.5,Number(document.getElementById('hours').value));
+      const startTime=document.getElementById('startHour').value||'09:00';
+      controls.style.display='none';display.style.display='flex';
+      resetBtn.style.display='flex'; // 开始后显示 reset 按钮
+      function tick(){
+        const amt=computeTodayAmount(salary,days,hours,startTime);
+        const formatted=formatAmount(amt);
+        updateDigitsTo(formatted);
+      }
+      createDigitsContainer(10);tick();timer=setInterval(tick,Math.max(100,Math.round(freq*1000)));
+    }
+
+    startBtn.addEventListener('click',start);
+    resetBtn.addEventListener('click',()=>{
+      if(timer){clearInterval(timer);timer=null}
+      display.style.display='none';controls.style.display='block';digitsWrap.innerHTML='';
+      resetBtn.style.display='none'; // 重置时隐藏按钮
+    });
+    window.addEventListener('load',()=>createDigitsContainer(10));
+  </script>
+</body>
+</html>
