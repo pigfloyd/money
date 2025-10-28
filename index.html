@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>实时今日工资到账</title>
+  <title>Pay Money to My Pain</title>
   <style>
     html,body{height:100%;margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial;color:#000;background:#fff}
     .wrap{min-height:100%;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;position:relative}
@@ -29,14 +29,17 @@
       width: 44px;
       height: 34px;
       color:#000;
-      display:none; /* 默认隐藏 */
+      display:none;
       align-items:center;
       justify-content:center;
       cursor:pointer;
       user-select:none;
-      transition:opacity 0.3s;
+      border:1px solid #ccc;
+      border-radius:8px;
+      background:#f8f8f8;
+      transition:background 0.3s,opacity 0.3s;
     }
-    .reset-icon:hover{opacity: 0.8;}
+    .reset-icon:hover{background:#eee;opacity:0.8;}
 
     @media (max-width:420px){
       .currency{font-size:36px}
@@ -111,14 +114,19 @@
       const perSecond=dailyPay/workSeconds;return elapsed*perSecond;
     }
 
-    function start(){
+    function start(fromCache=false){
       const freq=Math.max(0.1,Number(document.getElementById('freq').value));
       const salary=Math.max(0,Number(document.getElementById('salary').value));
       const days=Math.max(1,Number(document.getElementById('days').value));
       const hours=Math.max(0.5,Number(document.getElementById('hours').value));
       const startTime=document.getElementById('startHour').value||'09:00';
+
+      // 保存到 localStorage
+      localStorage.setItem('wageSettings', JSON.stringify({freq,salary,days,hours,startTime}));
+
       controls.style.display='none';display.style.display='flex';
-      resetBtn.style.display='flex'; // 开始后显示 reset 按钮
+      resetBtn.style.display='flex';
+
       function tick(){
         const amt=computeTodayAmount(salary,days,hours,startTime);
         const formatted=formatAmount(amt);
@@ -127,13 +135,30 @@
       createDigitsContainer(10);tick();timer=setInterval(tick,Math.max(100,Math.round(freq*1000)));
     }
 
-    startBtn.addEventListener('click',start);
+    startBtn.addEventListener('click',()=>start());
+
     resetBtn.addEventListener('click',()=>{
       if(timer){clearInterval(timer);timer=null}
       display.style.display='none';controls.style.display='block';digitsWrap.innerHTML='';
-      resetBtn.style.display='none'; // 重置时隐藏按钮
+      resetBtn.style.display='none';
+      localStorage.removeItem('wageSettings');
     });
-    window.addEventListener('load',()=>createDigitsContainer(10));
+
+    window.addEventListener('load',()=>{
+      createDigitsContainer(10);
+      const cache=localStorage.getItem('wageSettings');
+      if(cache){
+        try{
+          const {freq,salary,days,hours,startTime}=JSON.parse(cache);
+          document.getElementById('freq').value=freq;
+          document.getElementById('salary').value=salary;
+          document.getElementById('days').value=days;
+          document.getElementById('hours').value=hours;
+          document.getElementById('startHour').value=startTime;
+          start(true);
+        }catch(e){console.error(e)}
+      }
+    });
   </script>
 </body>
 </html>
